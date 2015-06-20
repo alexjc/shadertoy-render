@@ -10,3 +10,10 @@ Dependencies include `numpy`, `scipy` and `vispy`.  You can install them with Py
     > pip install numpy scipy vispy
 
 The output is a MP4 file with default encoding settings, which you can upload to YouTube for example.
+
+.. image:: docs/example.jpg
+	:target: https://youtu.be/GAauIQFHaZs
+
+1. `Source ShaderToy <https://www.shadertoy.com/view/4sB3D1>`_ script by Inigo Quilez.
+
+2. `Rendered Video <https://youtu.be/GAauIQFHaZs>`_ at 1080p uploaded to YouTube.
