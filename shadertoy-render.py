@@ -51,20 +51,6 @@ void main()
 }
 """
 
-outf = 'test.mp4'
-rate = 30
-cmdstring = ('/usr/local/bin/ffmpeg',
-             '-loglevel', 'panic',
-             '-r', '%d' % rate,
-             '-f','image2pipe',
-             '-pix_fmt', 'yuv420p',
-             '-vcodec', 'png',
-             '-i', 'pipe:',
-             '-c:v', 'libx264',
-             outf
-             )
-ffmpeg = subprocess.Popen(cmdstring, stdin=subprocess.PIPE)
-
 
 def get_idate():
     now = datetime.datetime.now()
@@ -81,7 +67,7 @@ def noise(resolution=64, nchannels=1):
 
 class RenderingCanvas(app.Canvas):
 
-    def __init__(self, glsl):
+    def __init__(self, glsl, stdout=None):
         app.Canvas.__init__(self, keys='interactive', size=(960, 540), title='ShaderToy Renderer')
         self.program = gloo.Program(vertex, fragment % glsl)
         self.program["position"] = [(-1, -1), (-1, 1), (1, 1), (-1, -1), (1, 1), (1, -1)]
@@ -94,6 +80,7 @@ class RenderingCanvas(app.Canvas):
 
         self.activate_zoom()
 
+        self._stdout = stdout
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
         self.show()
 
@@ -108,8 +95,9 @@ class RenderingCanvas(app.Canvas):
         self.program['iGlobalTime'] += 1.0 / 30.0
         self.program.draw()
 
-        framebuffer = vispy.gloo.util._screenshot((0, 0, self.physical_size[0], self.physical_size[1]))
-        scipy.misc.imsave(ffmpeg.stdin, framebuffer, format='png')
+        if self._stdout is not None:
+            framebuffer = vispy.gloo.util._screenshot((0, 0, self.physical_size[0], self.physical_size[1]))
+            scipy.misc.imsave(self._stdout, framebuffer, format='png')
 
     def on_mouse_click(self, event):
         print('on_mouse_click', event)
@@ -137,11 +125,25 @@ class RenderingCanvas(app.Canvas):
 
 
 if __name__ == '__main__':
-    glsl = open('example.glsl', 'r').read()
-    
+    vispy.set_log_level('WARNING')
     vispy.use(app='glfw')
-    
-    canvas = RenderingCanvas(glsl)
+
+    outf = 'test.mp4'
+    rate = 30
+    cmdstring = ('/usr/local/bin/ffmpeg',
+                 '-loglevel', 'panic',
+                 '-r', '%d' % rate,
+                 '-f','image2pipe',
+                 '-pix_fmt', 'yuv420p',
+                 '-vcodec', 'png',
+                 '-i', 'pipe:',
+                 '-c:v', 'libx264',
+                 outf
+                 )
+    ffmpeg = subprocess.Popen(cmdstring, stdin=subprocess.PIPE)
+
+    glsl = open('example.glsl', 'r').read()    
+    canvas = RenderingCanvas(glsl, stdout=ffmpeg.stdin)
     canvas.set_channel_input(noise(resolution=256, nchannels=2), i=0)
     canvas.set_channel_input(noise(resolution=256, nchannels=2), i=1)
 
