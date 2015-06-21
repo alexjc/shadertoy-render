@@ -12,7 +12,6 @@ import datetime
 import subprocess
 
 import numpy
-import scipy.misc
 
 import vispy
 from vispy import gloo
@@ -68,7 +67,7 @@ def noise(resolution=64, nchannels=1):
 
 class RenderingCanvas(app.Canvas):
 
-    def __init__(self, glsl, stdout=None, rate=30.0):
+    def __init__(self, glsl, stdout=None, rate=30.0, duration=None):
         app.Canvas.__init__(self, keys='interactive', size=(960, 540), title='ShaderToy Renderer')
         self.program = gloo.Program(vertex, fragment % glsl)
         self.program["position"] = [(-1, -1), (-1, 1), (1, 1), (-1, -1), (1, 1), (1, -1)]
@@ -83,6 +82,7 @@ class RenderingCanvas(app.Canvas):
 
         self._stdout = stdout
         self._rate = rate
+        self._duration = duration
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
         self.show()
 
@@ -99,7 +99,10 @@ class RenderingCanvas(app.Canvas):
 
         if self._stdout is not None:
             framebuffer = vispy.gloo.util._screenshot((0, 0, self.physical_size[0], self.physical_size[1]))
-            scipy.misc.imsave(self._stdout, framebuffer, format='png')
+            self._stdout.write(framebuffer.tobytes())
+
+        if self._duration is not None and self.program['iGlobalTime'] >= self._duration:
+            app.quit()
 
     def on_mouse_click(self, event):
         print('on_mouse_click', event)
@@ -114,8 +117,6 @@ class RenderingCanvas(app.Canvas):
             self.program['iMouse'] = imouse
 
     def on_timer(self, event):
-        # self.program['iGlobalTime'] = event.elapsed
-        self.program['iDate'] = get_idate()
         self.update()
 
     def on_resize(self, event):
@@ -133,31 +134,36 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Render a ShaderToy script directly to a video file.')
     parser.add_argument('input', type=str, help='Source shader file to load from disk.')
     parser.add_argument('output', type=str, help='The destination video file to write.')
-    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render.')  
+    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render.')
+    parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode.')  
     args = parser.parse_args()
 
     ffmpeg = subprocess.Popen(
                 ('ffmpeg',
+                 '-threads', '0',
                  '-loglevel', 'panic',
                  '-r', '%d' % args.rate,
-                 '-f','image2pipe',
-                 '-pix_fmt', 'yuv420p',
-                 '-vcodec', 'png',
-                 '-i', 'pipe:',
+                 '-f', 'rawvideo',
+                 '-pix_fmt', 'rgba',
+                 '-s', '1920x1080',
+                 '-i', '-',
                  '-c:v', 'libx264',
                  '-y', args.output),
                  stdin=subprocess.PIPE)
 
-    glsl_shader = open(args.input, 'r').read()    
-    canvas = RenderingCanvas(glsl_shader, stdout=ffmpeg.stdin, rate=args.rate)
-    canvas.set_channel_input(noise(resolution=256, nchannels=2), i=0)
-    canvas.set_channel_input(noise(resolution=256, nchannels=2), i=1)
+    glsl_shader = open(args.input, 'r').read()
+    canvas = RenderingCanvas(glsl_shader,
+                             stdout=ffmpeg.stdin,
+                             rate=args.rate,
+                             duration=args.duration)
+    canvas.set_channel_input(noise(resolution=256, nchannels=3), i=0)
+    canvas.set_channel_input(noise(resolution=256, nchannels=1), i=1)
 
     canvas.show()
     
     try:
         canvas.app.run()
-    except KeyboardError:
+    except KeyboardInterrupt:
         pass
         
     ffmpeg.stdin.close()

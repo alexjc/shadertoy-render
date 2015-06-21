@@ -8,9 +8,9 @@ A simple Python script that uses ``ffmpeg`` as a subprocess to render ShaderToy 
 
 	> python shadertoy-render.py example.glsl example.mp4
 
-Dependencies include `numpy`, `scipy` and `vispy`.  You can install them with Python as follows:
+Dependencies include `numpy` and `vispy`.  You can install them with Python as follows:
 
-    > pip install numpy scipy vispy
+    > pip install numpy vispy
 
 The output is a MP4 file with default encoding settings, which you can upload to YouTube for example.  See the source code for details!
 
