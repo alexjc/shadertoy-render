@@ -67,8 +67,8 @@ def noise(resolution=64, nchannels=1):
 
 class RenderingCanvas(app.Canvas):
 
-    def __init__(self, glsl, stdout=None, resolution=None, rate=30.0, duration=None):
-        app.Canvas.__init__(self, keys='interactive', size=resolution, title='ShaderToy Renderer')
+    def __init__(self, glsl, stdout=None, size=None, rate=30.0, duration=None):
+        app.Canvas.__init__(self, keys='interactive', size=size, title='ShaderToy Renderer')
         self.program = gloo.Program(vertex, fragment % glsl)
         self.program["position"] = [(-1, -1), (-1, 1), (1, 1), (-1, -1), (1, 1), (1, -1)]
         self.program['iMouse'] = 0.0, 0.0, 0.0, 0.0
@@ -85,7 +85,7 @@ class RenderingCanvas(app.Canvas):
         self._duration = duration
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
 
-        self.size = (resolution[0] / self.pixel_scale, resolution[1] / self.pixel_scale)
+        self.size = (size[0] / self.pixel_scale, size[1] / self.pixel_scale)
         self.show()
 
     def set_channel_input(self, img, i=0):
@@ -107,7 +107,6 @@ class RenderingCanvas(app.Canvas):
             app.quit()
 
     def on_mouse_click(self, event):
-        print('on_mouse_click', event)
         imouse = event.pos + event.pos
         self.program['iMouse'] = imouse
 
@@ -138,9 +137,10 @@ if __name__ == '__main__':
     parser.add_argument('output', type=str, help='The destination video file to write.')
     parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render, e.g. 60 (int).')
     parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
-    parser.add_argument('--resolution', type=str, default='1280x720', help='Width and height of the rendering, e.g. 1920x1080 (string).')
+    parser.add_argument('--size', type=str, default='1280x720', help='Width and height of the rendering, e.g. 1920x1080 (string).')
     args = parser.parse_args()
-
+    
+    resolution = [int(i) for i in args.size.split('x')]
     ffmpeg = subprocess.Popen(
                 ('ffmpeg',
                  '-threads', '0',
@@ -148,7 +148,7 @@ if __name__ == '__main__':
                  '-r', '%d' % args.rate,
                  '-f', 'rawvideo',
                  '-pix_fmt', 'rgba',
-                 '-s', args.resolution,
+                 '-s', args.size,
                  '-i', '-',
                  '-c:v', 'libx264',
                  '-y', args.output),
@@ -157,7 +157,7 @@ if __name__ == '__main__':
     glsl_shader = open(args.input, 'r').read()
     canvas = RenderingCanvas(glsl_shader,
                              stdout=ffmpeg.stdin,
-                             resolution=[int(i) for i in args.resolution.split('x')],
+                             size=resolution,
                              rate=args.rate,
                              duration=args.duration)
     canvas.set_channel_input(noise(resolution=256, nchannels=3), i=0)
