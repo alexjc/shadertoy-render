@@ -4,7 +4,7 @@
 # Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License.
 
-from __future__ import (unicode_literals)
+from __future__ import (unicode_literals, print_function)
 
 import sys
 import argparse
@@ -67,8 +67,8 @@ def noise(resolution=64, nchannels=1):
 
 class RenderingCanvas(app.Canvas):
 
-    def __init__(self, glsl, stdout=None, rate=30.0, duration=None):
-        app.Canvas.__init__(self, keys='interactive', size=(960, 540), title='ShaderToy Renderer')
+    def __init__(self, glsl, stdout=None, resolution=None, rate=30.0, duration=None):
+        app.Canvas.__init__(self, keys='interactive', size=resolution, title='ShaderToy Renderer')
         self.program = gloo.Program(vertex, fragment % glsl)
         self.program["position"] = [(-1, -1), (-1, 1), (1, 1), (-1, -1), (1, 1), (1, -1)]
         self.program['iMouse'] = 0.0, 0.0, 0.0, 0.0
@@ -84,6 +84,8 @@ class RenderingCanvas(app.Canvas):
         self._rate = rate
         self._duration = duration
         self._timer = app.Timer('auto', connect=self.on_timer, start=True)
+
+        self.size = (resolution[0] / self.pixel_scale, resolution[1] / self.pixel_scale)
         self.show()
 
     def set_channel_input(self, img, i=0):
@@ -134,8 +136,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Render a ShaderToy script directly to a video file.')
     parser.add_argument('input', type=str, help='Source shader file to load from disk.')
     parser.add_argument('output', type=str, help='The destination video file to write.')
-    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render.')
-    parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode.')  
+    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render, e.g. 60 (int).')
+    parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
+    parser.add_argument('--resolution', type=str, default='1280x720', help='Width and height of the rendering, e.g. 1920x1080 (string).')
     args = parser.parse_args()
 
     ffmpeg = subprocess.Popen(
@@ -145,7 +148,7 @@ if __name__ == '__main__':
                  '-r', '%d' % args.rate,
                  '-f', 'rawvideo',
                  '-pix_fmt', 'rgba',
-                 '-s', '1920x1080',
+                 '-s', args.resolution,
                  '-i', '-',
                  '-c:v', 'libx264',
                  '-y', args.output),
@@ -154,13 +157,12 @@ if __name__ == '__main__':
     glsl_shader = open(args.input, 'r').read()
     canvas = RenderingCanvas(glsl_shader,
                              stdout=ffmpeg.stdin,
+                             resolution=[int(i) for i in args.resolution.split('x')],
                              rate=args.rate,
                              duration=args.duration)
     canvas.set_channel_input(noise(resolution=256, nchannels=3), i=0)
     canvas.set_channel_input(noise(resolution=256, nchannels=1), i=1)
 
-    canvas.show()
-    
     try:
         canvas.app.run()
     except KeyboardInterrupt:
