@@ -101,7 +101,7 @@ class RenderingCanvas(app.Canvas):
 
         if self._stdout is not None:
             framebuffer = vispy.gloo.util._screenshot((0, 0, self.physical_size[0], self.physical_size[1]))
-            self._stdout.write(framebuffer.tobytes())
+            self._stdout.write(framebuffer.tostring())
 
         if self._duration is not None and self.program['iGlobalTime'] >= self._duration:
             app.quit()
@@ -138,13 +138,14 @@ if __name__ == '__main__':
     parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render, e.g. 60 (int).')
     parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
     parser.add_argument('--size', type=str, default='1280x720', help='Width and height of the rendering, e.g. 1920x1080 (string).')
+    parser.add_argument('--verbose', default=False, action='store_true', help='Call subprocess with a high logging level.')
     args = parser.parse_args()
     
     resolution = [int(i) for i in args.size.split('x')]
     ffmpeg = subprocess.Popen(
                 ('ffmpeg',
                  '-threads', '0',
-                 '-loglevel', 'panic',
+                 '-loglevel', 'verbose' if args.verbose else 'panic',
                  '-r', '%d' % args.rate,
                  '-f', 'rawvideo',
                  '-pix_fmt', 'rgba',
