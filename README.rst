@@ -13,6 +13,11 @@ Command-line arguments are documented with the ``-h`` switch, for example:
 * ``--size`` — Resolution of the render window, for example ``1920x1080``.
 * ``--duration`` — Total length of the output video in seconds, e.g. ``45.0``.
 * ``--rate`` — Number of frames per second used during rendering, e.g. ``60``.
+* ``--verbose`` — Show the full output of ``ffmpeg`` in verbose mode.
+
+Example of more advanced usage:
+
+	> python shadertoy-render.py example.glsl example.mp4 --size=1920x1080 --rate=60 --duration=120.0
 
 It should run on Linux and OSX where ``ffmpeg`` is in the path, on Windows with minor changes assuming the binary is found.  Python dependencies include `numpy` and `vispy`, which you can install them with PIP as follows:
 
