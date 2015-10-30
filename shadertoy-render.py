@@ -31,7 +31,6 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
-
 vertex = """
 #version 120
 
@@ -71,7 +70,8 @@ preamble_lines = fragment_template.split('\n').index("%s")
 error_shader = """
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
-    fragColor = vec4(1.0, 0.0, 1.0, 1.0);
+	vec2 uv = fragCoord.xy / iResolution.xy;
+	fragColor = vec4(uv,0.5+0.5*sin(iGlobalTime),1.0);
 }
 """
 
@@ -108,28 +108,28 @@ def noise(resolution=64, nchannels=1):
 
 class RenderingCanvas(app.Canvas):
 
-    def __init__(
-            self,
-            glsl,
-            filename,
-            size = None,
-            position = None,
-            t = 0.0,
-            interval = 'auto',
-            always_on_top = False,
-            paused = False,
-            tiled_render = False,
-			progress_file = None,
-            tile_size = 256):
+    def __init__(self,
+                 glsl,
+                 filename,
+                 size=None,
+                 position=None,
+                 start_time=0.0,
+                 interval='auto',
+                 duration=None,
+                 always_on_top=False,
+                 paused=False,
+                 tiled_render=False,
+			     progress_file=None,
+                 tile_size=256,
+                 stdout=None):
 
-        app.Canvas.__init__(
-            self,
-            keys = 'interactive',
-            size = [tile_size] * 2 if tiled_render else size,
-            position = None,
-            title = filename,
-            always_on_top = always_on_top,
-            show = False)
+        app.Canvas.__init__(self,
+                            keys='interactive',
+                            size=[tile_size] * 2 if tiled_render else size,
+                            position=None,
+                            title=filename,
+                            always_on_top=always_on_top,
+                            show=False)
 
         self._filename = filename
         self._render_size = tuple(size)
@@ -146,7 +146,7 @@ class RenderingCanvas(app.Canvas):
 
         for i in range(4):
             self.program['iChannelTime[%d]' % i] = 0.0
-        self.program['iGlobalTime'] = t
+        self.program['iGlobalTime'] = start_time
 
         self.program['iOffset'] = 0.0, 0.0
 
@@ -154,9 +154,14 @@ class RenderingCanvas(app.Canvas):
 
         self._paused = paused
         self._timer = None
+        self._start_time = start_time
         self._interval = interval
+        self._duration = duration
+        self._stdout = stdout
 
-        self._time_start = time.clock()
+        clock = time.clock()
+        self._clock_time_zero = clock - start_time
+        self._clock_time_start = clock
 
         if position is not None:
             self.position = position
@@ -185,10 +190,10 @@ class RenderingCanvas(app.Canvas):
 				self.write_img(self._img, self._progress_file)
 
             self.program['iResolution'] = (self._render_size[0], self._render_size[1], 0.)
-            self._timer = app.Timer(interval, connect=self.on_timer, start=True)
+            self.ensure_timer()
         else:
             if not paused:
-                self._timer = app.Timer(interval, connect=self.on_timer, start=True)
+                self.ensure_timer()
             self.show()
 
     def set_channel_input(self, img, i=0):
@@ -219,12 +224,20 @@ class RenderingCanvas(app.Canvas):
                 errors = self.process_errors(errors)
                 print_err("Shader failed to compile:")
                 print_err(errors)
+
+                # Switch to error shader
+
+                self._glsl = error_shader
+                self.update()
             else:
                 self.program.set_shaders(vertex, fragment)
             gl.glDeleteShader(frag_handle)
 
         if not self._paused:
-            self.program['iGlobalTime'] = time.clock() - self._time_start
+            if self._stdout:
+                self.program['iGlobalTime'] += self._interval
+            else:
+                self.program['iGlobalTime'] = time.clock() - self._clock_time_zero
 
         if self._tiled_render:
             with self._fbo:
@@ -246,6 +259,14 @@ class RenderingCanvas(app.Canvas):
                 self._img[row:row + ts[1], col:col + ts[0], :] = img
         else:
             self.program.draw()
+
+            if self._stdout is not None:
+                img = _screenshot()
+                self._stdout.write(img.tostring())
+
+            if self._duration is not None and self.program['iGlobalTime'] - self._start_time >= self._duration:
+                app.quit()
+
 
     def on_draw(self, event):
         self.draw()
@@ -278,17 +299,15 @@ class RenderingCanvas(app.Canvas):
             img = _screenshot()
             self.write_img(img)
         elif event.key == "a":
-            print_msg(
-                "Size/pos args: --size %dx%d --pos %d,%d" % (
-                    self.physical_size[0],
-                    self.physical_size[1],
-                    self.position[0],
-                    self.position[1]))
+            print_msg("Size/pos args: --size %dx%d --pos %d,%d" %
+                      (self.physical_size[0],
+                       self.physical_size[1],
+                       self.position[0],
+                       self.position[1]))
         elif event.key == "f":
             self._profile = not self._profile
             if self._profile:
                 def print_profile(fps):
-
                     print_msg("%.2f ms/frame" % (1000.0 / float(fps)))
                     return False
 
@@ -331,10 +350,10 @@ class RenderingCanvas(app.Canvas):
 
             self._tile_index += 1
 
-            time_elapsed = time.clock() - self._time_start
-            time_per_tile = time_elapsed / self._tile_index
-            time_total = time_per_tile * self._tile_count
-            time_remain = time_total - time_elapsed
+            clock_time_elapsed = time.clock() - self._clock_time_start
+            clock_time_per_tile = clock_time_elapsed / self._tile_index
+            clock_time_total = clock_time_per_tile * self._tile_count
+            clock_time_remain = clock_time_total - clock_time_elapsed
 
             if self._tile_index == self._tile_count:
                 self.write_img(self._img)
@@ -352,9 +371,9 @@ class RenderingCanvas(app.Canvas):
                       (self._tile_index,
                        self._tile_count,
                        self._tile_index * 100.0 / self._tile_count,
-                       str(datetime.timedelta(seconds=round(time_elapsed))),
-                       str(datetime.timedelta(seconds=round(time_remain))),
-                       str(datetime.timedelta(seconds=round(time_total)))))
+                       str(datetime.timedelta(seconds=round(clock_time_elapsed))),
+                       str(datetime.timedelta(seconds=round(clock_time_remain))),
+                       str(datetime.timedelta(seconds=round(clock_time_total)))))
         else:
             self.update()
 
@@ -368,6 +387,7 @@ class RenderingCanvas(app.Canvas):
 
     def process_errors(self, errors):
         # NOTE (jasminp) Error message format depends on driver. Does this catch them all?
+
         p = re.compile(r'.*0:(\d+): (.*)')
         linesOut = []
         for line in errors.split('\n'):
@@ -385,11 +405,13 @@ class RenderingCanvas(app.Canvas):
 
     def ensure_timer(self):
         if not self._timer:
-            self._timer = app.Timer(self._interval, connect=self.on_timer, start=True)
+            self._timer = app.Timer('auto' if self._stdout else self._interval,
+                                    connect=self.on_timer,
+                                    start=True)
 
     def update_timer_state(self):
         if not self._paused:
-            self._time_start = time.clock() - self.program['iGlobalTime']
+            self._clock_time_zero = time.clock() - self.program['iGlobalTime']
             self.ensure_timer()
         else:
             if self._profile:
@@ -401,7 +423,7 @@ class RenderingCanvas(app.Canvas):
 
             self.print_t()
 
-    def write_img(self, img, filename = None):
+    def write_img(self, img, filename=None):
         if filename is None:
             suffix = 0;
             filepat = "screen%d.png"
@@ -431,24 +453,32 @@ class ShaderWatcher(FileSystemEventHandler):
 if __name__ == '__main__':
     vispy.set_log_level('WARNING')
 
+    # GLFW not part of anaconda python distro; works fine with default (PyQt4)
+
+    try:
+        vispy.use(app='glfw')
+    except RuntimeError as e:
+        pass
+
     parser = argparse.ArgumentParser(description='Render a ShaderToy-style shader from the specified file.')
     parser.add_argument('input', type=str, help='Source shader file to load from disk.')
-    parser.add_argument(
-        '--size',
-        type=str,
-        default='1280x720',
-        help='Width and height of the viewport, e.g. 1920x1080 (string).')
-    parser.add_argument(
-        '--pos',
-        type=str,
-        help='Position of the viewport, e.g. 100,100 (string).')
+    parser.add_argument('--size',
+                        type=str,
+                        default='1280x720',
+                        help='Width and height of the viewport, e.g. 1920x1080 (string).')
+    parser.add_argument('--pos',
+                        type=str,
+                        help='Position of the viewport, e.g. 100,100 (string).')
     parser.add_argument('--time', type=float, default=0.0, help="Initial time value.")
-    parser.add_argument('--fps', type=float, help="Refresh rate in FPS (float).")
+    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render, e.g. 60 (int).')
+    parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
     parser.add_argument('--top', action='store_true', help="Keep window on top.")
     parser.add_argument('--pause', action='store_true', help="Start paused.")
     parser.add_argument('--tiled', action='store_true', help="Do tiled render and quit.")
     parser.add_argument('--tile-size', type=int, default=256, help="Tile size for tiled rendering.")
     parser.add_argument('--progress-file', type=str, help="Save tiled rendering progress to specified PNG file.")
+    parser.add_argument('--video', type=str, help="Render directly to the specified video file.")
+    parser.add_argument('--verbose', default=False, action='store_true', help='Call subprocess with a high logging level.')
 
     # TODO (jasminp) Add --resume to resume interrupted tiled render using progress file
 
@@ -457,38 +487,71 @@ if __name__ == '__main__':
     resolution = [int(i) for i in args.size.split('x')]
     position = [int(i) for i in args.pos.split(',')] if args.pos is not None else None
 
-    if args.fps is None or args.fps <= 0.0:
+    if args.rate is None or args.rate <= 0.0:
         interval = 'auto'
     else:
-        interval = 1.0 / args.fps
-
-    glsl_shader = open(args.input, 'r').read()
-    canvas = RenderingCanvas(
-                glsl_shader,
-                args.input,
-                size = resolution,
-                position = position,
-                t = args.time,
-                interval = interval,
-                always_on_top = args.top,
-                paused = args.pause,
-                tiled_render = args.tiled,
-				progress_file = args.progress_file,
-                tile_size = args.tile_size)
+        interval = 1.0 / float(args.rate)
 
     filepath = os.path.abspath(args.input)
+    glsl_shader = open(args.input, 'r').read()
 
-    observer = Observer()
-    observer.schedule(ShaderWatcher(filepath, canvas), os.path.dirname(filepath))
-    observer.start()
+    observer = None
+    ffmpeg = None
+    stdout = None
+
+    if args.video:
+        ffmpeg = subprocess.Popen(
+            ('ffmpeg',
+             '-threads', '0',
+             '-loglevel', 'verbose' if args.verbose else 'panic',
+             '-r', '%d' % args.rate,
+             '-f', 'rawvideo',
+             '-pix_fmt', 'rgba',
+             '-s', args.size,
+             '-i', '-',
+             '-c:v', 'libx264',
+             '-y', args.video),
+            stdin=subprocess.PIPE)
+        stdout = ffmpeg.stdin
+
+        # TODO (jasminp) Issue warning/error if these are specified
+
+        args.pause = False
+        args.tiled = False
+        if interval == 'auto':
+            interval = 1.0 / 30.0
+
+    canvas = RenderingCanvas(glsl_shader,
+                             args.input,
+                             size=resolution,
+                             position=position,
+                             start_time=args.time,
+                             interval=interval,
+                             duration=args.duration,
+                             always_on_top=args.top,
+                             paused=args.pause,
+                             tiled_render=args.tiled,
+				             progress_file=args.progress_file,
+                             tile_size=args.tile_size,
+                             stdout=stdout)
+
+    if not args.video:
+        observer = Observer()
+        observer.schedule(ShaderWatcher(filepath, canvas), os.path.dirname(filepath))
+        observer.start()
 
     try:
         canvas.app.run()
     except KeyboardInterrupt:
         pass
 
-    observer.stop()
-    observer.join()
+    if ffmpeg:
+        ffmpeg.stdin.close()
+        ffmpeg.wait()
+
+    if observer:
+        observer.stop()
+        observer.join()
 
 # Local Variables:
 # python-indent: 4
