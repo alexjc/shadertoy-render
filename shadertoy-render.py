@@ -7,13 +7,13 @@
 
 from __future__ import (unicode_literals, print_function)
 
-import re
-import sys
 import argparse
-import time
 import datetime
-import subprocess
 import os.path
+import re
+import subprocess
+import sys
+import time
 
 import numpy
 
@@ -92,12 +92,13 @@ def print_err(msg):
     sys.stderr.flush()
 
 
-def get_idate():
-    now = datetime.datetime.now()
-    utcnow = datetime.datetime.utcnow()
-    midnight_utc = datetime.datetime.combine(utcnow.date(), datetime.time(0))
-    delta = utcnow - midnight_utc
-    return (now.year, now.month, now.day, delta.seconds)
+def error(msg):
+    print_err("Error: " + msg)
+    sys.exit(1)
+
+
+def warn(msg):
+    print_err("Warning: " + msg)
 
 
 def noise(resolution=64, nchannels=1):
@@ -387,7 +388,7 @@ class RenderingCanvas(app.Canvas):
     def process_errors(self, errors):
         # NOTE (jasminp) Error message format depends on driver. Does this catch them all?
 
-        p = re.compile(r'.*0:(\d+): (.*)')
+        p = re.compile(r'.*?0:(\d+): (.*)')
         linesOut = []
         for line in errors.split('\n'):
             result = p.match(line)
@@ -469,7 +470,7 @@ if __name__ == '__main__':
                         type=str,
                         help='Position of the viewport, e.g. 100,100 (string).')
     parser.add_argument('--time', type=float, default=0.0, help="Initial time value.")
-    parser.add_argument('--rate', type=int, default=30, help='Number of frames per second to render, e.g. 60 (int).')
+    parser.add_argument('--rate', type=int, default=None, help='Number of frames per second to render, e.g. 60 (int).')
     parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
     parser.add_argument('--top', action='store_true', help="Keep window on top.")
     parser.add_argument('--pause', action='store_true', help="Start paused.")
@@ -486,8 +487,14 @@ if __name__ == '__main__':
     resolution = [int(i) for i in args.size.split('x')]
     position = [int(i) for i in args.pos.split(',')] if args.pos is not None else None
 
+    if args.rate is None and args.video:
+        args.rate = 30
+
     if args.rate is None or args.rate <= 0.0:
-        interval = 'auto'
+        if args.video:
+            error("invalid --rate argument (%d)" % args.rate)
+        else:
+            interval = 'auto'
     else:
         interval = 1.0 / float(args.rate)
 
@@ -513,13 +520,14 @@ if __name__ == '__main__':
             stdin=subprocess.PIPE)
         stdout = ffmpeg.stdin
 
-        # TODO (jasminp) Issue warning/error if these are specified
-        # TODO (jasminp) Add support for tiled video rendering (e.g. for 4k)
+        if args.tiled:
+            # TODO (jasminp) Add support for tiled video rendering (e.g. for 4k)
 
-        args.tiled = False
-        args.pause = False
-        if interval == 'auto':
-            interval = 1.0 / 30.0
+            error("tiled rendering not currently supported when rendering to video.")
+
+        if args.pause:
+            warn("--pause ignored when rendering to video.")
+            args.pause = False
 
     canvas = RenderingCanvas(glsl_shader,
                              args.input,
