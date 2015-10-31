@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# Uses code from shadertoy-render by Alex J. Champandard (https://github.com/alexjc/shadertoy-render)
-# Copyright (c) 2015, Jasmin Patry
 # Copyright (c) 2015, Alex J. Champandard
+# Copyright (c) 2015, Jasmin Patry
 # Copyright (c) 2015, Vispy Development Team.
 # Distributed under the (new) BSD License.
 
@@ -70,8 +69,8 @@ preamble_lines = fragment_template.split('\n').index("%s")
 error_shader = """
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
-	vec2 uv = fragCoord.xy / iResolution.xy;
-	fragColor = vec4(uv,0.5+0.5*sin(iGlobalTime),1.0);
+    vec2 uv = fragCoord.xy / iResolution.xy;
+    fragColor = vec4(uv,0.5+0.5*sin(iGlobalTime),1.0);
 }
 """
 
@@ -119,7 +118,7 @@ class RenderingCanvas(app.Canvas):
                  always_on_top=False,
                  paused=False,
                  tiled_render=False,
-			     progress_file=None,
+                 progress_file=None,
                  tile_size=256,
                  stdout=None):
 
@@ -187,7 +186,7 @@ class RenderingCanvas(app.Canvas):
             # Write progress file now so we'll know right away if there are any problems writing to it
 
             if self._progress_file:
-				self.write_img(self._img, self._progress_file)
+                self.write_img(self._img, self._progress_file)
 
             self.program['iResolution'] = (self._render_size[0], self._render_size[1], 0.)
             self.ensure_timer()
@@ -365,7 +364,7 @@ class RenderingCanvas(app.Canvas):
                 self._tile_coord[0] = 0
                 self._tile_coord[1] += self._tile_size
                 if self._progress_file:
-					self.write_img(self._img, self._progress_file)
+                    self.write_img(self._img, self._progress_file)
 
             print_msg("Tile %d / %d (%.2f%%) %s elapsed, %s remaining, %s total" % \
                       (self._tile_index,
@@ -515,9 +514,10 @@ if __name__ == '__main__':
         stdout = ffmpeg.stdin
 
         # TODO (jasminp) Issue warning/error if these are specified
+        # TODO (jasminp) Add support for tiled video rendering (e.g. for 4k)
 
-        args.pause = False
         args.tiled = False
+        args.pause = False
         if interval == 'auto':
             interval = 1.0 / 30.0
 
@@ -531,7 +531,7 @@ if __name__ == '__main__':
                              always_on_top=args.top,
                              paused=args.pause,
                              tiled_render=args.tiled,
-				             progress_file=args.progress_file,
+                             progress_file=args.progress_file,
                              tile_size=args.tile_size,
                              stdout=stdout)
 
@@ -552,8 +552,3 @@ if __name__ == '__main__':
     if observer:
         observer.stop()
         observer.join()
-
-# Local Variables:
-# python-indent: 4
-# indent-tabs-mode: nil
-# End:

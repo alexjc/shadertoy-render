@@ -57,4 +57,13 @@ docs/_build/
 target/
 
 # Screenshots
-*.png
+/*.png
+
+# Videos
+/*.mp4
+
+# Windows stuff
+/Thumbs.db
+
+# Emacs config
+/.dir-locals.el
