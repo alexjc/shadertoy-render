@@ -426,15 +426,20 @@ class RenderingCanvas(app.Canvas):
     def process_errors(self, errors):
         # NOTE (jasminp) Error message format depends on driver. Does this catch them all?
 
-        p = re.compile(r'.*?0:(\d+): (.*)')
+        lp = [re.compile(r'.*?0:(\d+): (.*)'),          # intel/win
+              re.compile(r'0\((\d+)\) :[^:]*: (.*)')]   # nvidia/win
+
         linesOut = []
         for line in errors.split('\n'):
-            result = p.match(line)
-            if result:
-                linesOut.append("%s(%d): error: %s" % (self._filename,
-                                                       int(result.group(1)) - preamble_lines,
-                                                       result.group(2)))
-            else:
+            result = None
+            for p in lp:
+                result = p.match(line)
+                if result:
+                    linesOut.append("%s(%d): error: %s" % (self._filename,
+                                                        int(result.group(1)) - preamble_lines,
+                                                        result.group(2)))
+                    break
+            if not result:
                 linesOut.append(line)
         return '\n'.join(linesOut)
 
