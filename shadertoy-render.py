@@ -535,7 +535,7 @@ if __name__ == '__main__':
 
     if args.rate is None or args.rate <= 0.0:
         if args.video:
-            error("invalid --rate argument (%d)" % args.rate)
+            error("invalid --rate argument (%d)." % args.rate)
         else:
             interval = 'auto'
     else:
@@ -566,6 +566,9 @@ if __name__ == '__main__':
         if args.pause:
             warn("--pause ignored when rendering to video.")
             args.pause = False
+
+        if args.tiled and args.duration is None:
+            error("must specify --duration for tiled video rendering.")
     else:
         if args.duration:
             warn("--duration ignored unless rendering to video.")
