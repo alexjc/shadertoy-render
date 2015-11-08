@@ -551,9 +551,6 @@ if __name__ == '__main__':
         elif file_ext != '.png':
             error("output file must be either PNG or MP4 file.")
 
-        if args.interactive and not output_to_video:
-            error("--interactive may only be specified for MP4 output files.")
-
         if args.interactive and args.tile_size:
             error("--interactive is incompatible with --tile-size.")
 
@@ -564,8 +561,12 @@ if __name__ == '__main__':
             if args.pause:
                 error("--pause may not be specified when rendering to video.")
 
-        elif args.duration:
-            error("--duration may not be specified for PNG output files.")
+        else:
+            if args.interactive:
+                error("--interactive may not be specified for PNG output files.")
+
+            if args.duration:
+                error("--duration may not be specified for PNG output files.")
 
     else:
         args.interactive = True
