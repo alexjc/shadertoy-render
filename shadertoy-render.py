@@ -112,30 +112,58 @@ class RenderingCanvas(app.Canvas):
     def __init__(self,
                  glsl,
                  filename,
-                 size=None,
+                 interactive=True,
+                 output_size=None,
+                 render_size=None,
                  position=None,
                  start_time=0.0,
                  interval='auto',
                  duration=None,
                  always_on_top=False,
                  paused=False,
-                 tiled_render=False,
+                 output=None,
                  progress_file=None,
-                 tile_size=256,
                  ffmpeg_pipe=None):
 
         app.Canvas.__init__(self,
-                            keys='interactive',
-                            size=[tile_size] * 2 if tiled_render else size,
+                            keys='interactive' if interactive else None,
+                            size=render_size if render_size else output_size,
                             position=None,
                             title=filename,
                             always_on_top=always_on_top,
-                            show=False)
+                            show=False,
+                            resizable=ffmpeg_pipe is None)
 
         self._filename = filename
-        self._render_size = tuple(size)
-        self._tiled_render = tiled_render
+        self._interactive = interactive
+        self._output_size = output_size
+        self._render_size = render_size if render_size else output_size
+        self._output = output
         self._profile = False
+        self._paused = paused
+        self._timer = None
+        self._start_time = start_time
+        self._interval = interval
+        self._ffmpeg_pipe = ffmpeg_pipe
+
+        # Determine number of frames to render
+
+        if duration:
+            assert interval != 'auto'
+            self._render_frame_count = math.ceil(duration / interval) + 1
+        elif not interactive:
+            self._render_frame_count = 1
+        else:
+            self._render_frame_count = None
+
+        self._render_frame_index = 0
+
+        clock = time.clock()
+        self._clock_time_zero = clock - start_time
+        self._clock_time_start = clock
+
+        if position is not None:
+            self.position = position
 
         # Initialize with a "known good" shader program, so that we can set all
         # the inputs once against it.
@@ -152,63 +180,39 @@ class RenderingCanvas(app.Canvas):
         self.program['iOffset'] = 0.0, 0.0
 
         self.activate_zoom()
-
-        self._paused = paused
-        self._timer = None
-        self._start_time = start_time
-        self._interval = interval
-        self._ffmpeg_pipe = ffmpeg_pipe
-
-        # Determine number of frames to render
-
-        if duration:
-            # Duration only valid for video rendering, for which we enforce a fixed interval
-
-            assert self._interval != 'auto'
-            self._ffmpeg_frame_count = math.ceil(duration / self._interval) + 1
-        elif self._tiled_render:
-            self._ffmpeg_frame_count = 1
-        else:
-            self._ffmpeg_frame_count = None
-
-        self._ffmpeg_frame_index = 0
-
-        clock = time.clock()
-        self._clock_time_zero = clock - start_time
-        self._clock_time_start = clock
-
-        if position is not None:
-            self.position = position
-
         self.set_channel_input(noise(resolution=256, nchannels=3), i=0)
         self.set_channel_input(noise(resolution=256, nchannels=1), i=1)
 
         self.set_shader(glsl)
 
-        if tiled_render:
+        if interactive:
+            if not paused:
+                self.ensure_timer()
+            self.show()
+        else:
             self._tile_index = 0
-            self._tile_count = ((size[0] + tile_size - 1) // tile_size) * ((size[1] + tile_size - 1) // tile_size)
+            self._tile_count = ((output_size[0] + render_size[0] - 1) // render_size[0]) * \
+                               ((output_size[1] + render_size[1] - 1) // render_size[1])
             self._tile_coord = [0, 0]
-            self._tile_size = tile_size
             self._progress_file = progress_file
-            self._rendertex = gloo.Texture2D(shape = (tile_size,) * 2 + (4,))
-            self._fbo = gloo.FrameBuffer(self._rendertex, gloo.RenderBuffer((tile_size,) * 2))
+
+            # Note that gloo.Texture2D and gloo.RenderBuffer use the numpy convention for dimensions ('shape'),
+            # i.e., HxW
+
+            self._rendertex = gloo.Texture2D(shape=render_size[::-1] + (4,))
+            self._fbo = gloo.FrameBuffer(self._rendertex, gloo.RenderBuffer(shape=render_size[::-1]))
 
             # Allocate buffer to hold final image
 
-            self._img = numpy.zeros(shape = self._render_size[::-1] + (4,), dtype = numpy.uint8)
+            self._img = numpy.zeros(shape=self._output_size[::-1] + (4,), dtype=numpy.uint8)
 
             # Write progress file now so we'll know right away if there are any problems writing to it
 
             if self._progress_file:
                 self.write_img(self._img, self._progress_file)
 
-            self.program['iResolution'] = (self._render_size[0], self._render_size[1], 0.)
+            self.program['iResolution'] = self._output_size + (0.,)
             self.ensure_timer()
-        else:
-            if not paused:
-                self.ensure_timer()
-            self.show()
 
     def set_channel_input(self, img, i=0):
         tex = gloo.Texture2D(img)
@@ -222,14 +226,16 @@ class RenderingCanvas(app.Canvas):
 
     def advance_time(self):
         if not self._paused:
-            if self._ffmpeg_pipe:
-                self.program['iGlobalTime'] += self._interval
-            else:
+            if self._interval == 'auto':
                 self.program['iGlobalTime'] = time.clock() - self._clock_time_zero
+            else:
+                self.program['iGlobalTime'] += self._interval
 
     def write_video_frame(self, img):
+        if img.shape[0] != self._render_size[1] or img.shape[1] != self._render_size[0]:
+            warn("Frame data is wrong size! Video will be corrupted.")
+
         self._ffmpeg_pipe.write(img.tostring())
-        self._ffmpeg_frame_index += 1
 
     def draw(self):
         if self._glsl:
@@ -258,36 +264,36 @@ class RenderingCanvas(app.Canvas):
                 self.program.set_shaders(vertex, fragment)
             gl.glDeleteShader(frag_handle)
 
-        if self._tiled_render:
-            with self._fbo:
-                ts = [self._tile_size] * 2
-
-                if self._tile_coord[0] + ts[0] > self._render_size[0]:
-                    ts[0] = self._render_size[0] - self._tile_coord[0]
-
-                if self._tile_coord[1] + ts[1] > self._render_size[1]:
-                    ts[1] = self._render_size[1] - self._tile_coord[1]
-
-                gloo.clear('black')
-                gloo.set_viewport(0, 0, *ts)
-                self.program['iOffset'] = self._tile_coord
-                self.program.draw()
-                img = _screenshot()
-                row = self._render_size[1] - self._tile_coord[1] - ts[1]
-                col = self._tile_coord[0]
-                self._img[row:row + ts[1], col:col + ts[0], :] = img
-        else:
+        if self._interactive:
             self.program.draw()
 
             if self._ffmpeg_pipe is not None:
                 img = _screenshot()
                 self.write_video_frame(img)
 
-                if self._ffmpeg_frame_count is not None and self._ffmpeg_frame_index >= self._ffmpeg_frame_count:
-                    app.quit()
-                    return
+            self._render_frame_index += 1
+            if self._render_frame_count is not None and self._render_frame_index >= self._render_frame_count:
+                app.quit()
+                return
 
             self.advance_time()
+        else:
+            with self._fbo:
+                rs = list(self._render_size)
+
+                if self._tile_coord[0] + rs[0] > self._output_size[0]:
+                    rs[0] = self._output_size[0] - self._tile_coord[0]
+
+                if self._tile_coord[1] + rs[1] > self._output_size[1]:
+                    rs[1] = self._output_size[1] - self._tile_coord[1]
+
+                gloo.set_viewport(0, 0, *rs)
+                self.program['iOffset'] = self._tile_coord
+                self.program.draw()
+                img = _screenshot()
+                row = self._output_size[1] - self._tile_coord[1] - rs[1]
+                col = self._tile_coord[0]
+                self._img[row:row + rs[1], col:col + rs[0], :] = img
 
     def on_draw(self, event):
         self.draw()
@@ -362,7 +368,9 @@ class RenderingCanvas(app.Canvas):
             self.update()
 
     def on_timer(self, event):
-        if self._tiled_render:
+        if self._interactive:
+            self.update()
+        else:
             # update() doesn't call on_draw() if window is hidden under some toolkits,
             # so call draw() directly
 
@@ -373,8 +381,8 @@ class RenderingCanvas(app.Canvas):
             self._tile_index += 1
 
             clock_time_elapsed = time.clock() - self._clock_time_start
-            rendered_tile_count = self._tile_index + self._ffmpeg_frame_index * self._tile_count
-            total_tile_count = self._tile_count * self._ffmpeg_frame_count
+            rendered_tile_count = self._tile_index + self._render_frame_index * self._tile_count
+            total_tile_count = self._tile_count * self._render_frame_count
             clock_time_per_tile = clock_time_elapsed / float(rendered_tile_count)
             clock_time_total = clock_time_per_tile * total_tile_count
             clock_time_remain = clock_time_total - clock_time_elapsed
@@ -390,8 +398,9 @@ class RenderingCanvas(app.Canvas):
             if self._tile_index == self._tile_count:
                 if self._ffmpeg_pipe:
                     self.write_video_frame(self._img)
+                    self._render_frame_index += 1
 
-                    if self._ffmpeg_frame_count is not None and self._ffmpeg_frame_index >= self._ffmpeg_frame_count:
+                    if self._render_frame_count is not None and self._render_frame_index >= self._render_frame_count:
                         app.quit()
                         return
 
@@ -402,24 +411,23 @@ class RenderingCanvas(app.Canvas):
 
                     self.advance_time()
                 else:
-                    self.write_img(self._img)
+                    self.write_img(self._img, self._output)
                     app.quit()
                     return
             else:
-                self._tile_coord[0] += self._tile_size
-                if self._tile_coord[0] >= self._render_size[0]:
+                self._tile_coord[0] += self._render_size[0]
+                if self._tile_coord[0] >= self._output_size[0]:
                     self._tile_coord[0] = 0
-                    self._tile_coord[1] += self._tile_size
+                    self._tile_coord[1] += self._render_size[1]
                     if self._progress_file:
                         self.write_img(self._img, self._progress_file)
-        else:
-            self.update()
 
     def on_resize(self, event):
-        self.activate_zoom()
+        if not self._ffmpeg_pipe:
+            self.activate_zoom()
 
     def activate_zoom(self):
-        if not self._tiled_render:
+        if self._interactive:
             gloo.set_viewport(0, 0, *self.physical_size)
             self.program['iResolution'] = (self.physical_size[0], self.physical_size[1], 0.0)
 
@@ -508,7 +516,7 @@ if __name__ == '__main__':
     parser.add_argument('--size',
                         type=str,
                         default='1280x720',
-                        help='Width and height of the viewport, e.g. 1920x1080 (string).')
+                        help='Width and height of the viewport/output, e.g. 1920x1080 (string).')
     parser.add_argument('--pos',
                         type=str,
                         help='Position of the viewport, e.g. 100,100 (string).')
@@ -517,24 +525,56 @@ if __name__ == '__main__':
     parser.add_argument('--duration', type=float, default=None, help='Total seconds of video to encode, e.g. 30.0 (float).')
     parser.add_argument('--top', action='store_true', help="Keep window on top.")
     parser.add_argument('--pause', action='store_true', help="Start paused.")
-    parser.add_argument('--tiled', action='store_true', help="Do tiled render.")
-    parser.add_argument('--tile-size', type=int, default=256, help="Tile size for tiled rendering.")
+    parser.add_argument('--tile-size', type=int, default=None, help="Tile size for tiled rendering, e.g. 256 (int).")
     parser.add_argument('--progress-file', type=str, help="Save tiled rendering progress to specified PNG file.")
-    parser.add_argument('--video', type=str, help="Render directly to the specified video file.")
+    parser.add_argument('--output',
+                        type=str,
+                        default=None,
+                        help="Render directly to the specified PNG or MP4 file. " + \
+                             "Rendering is offscreen unless --interactive is specified.")
+    parser.add_argument('--interactive',
+                        action='store_true',
+                        help="Render interactively. This is the default unless --output is specified.")
     parser.add_argument('--verbose', default=False, action='store_true', help='Call subprocess with a high logging level.')
-
-    # TODO (jasminp) Add --resume to resume interrupted tiled render using progress file
 
     args = parser.parse_args()
 
-    resolution = [int(i) for i in args.size.split('x')]
-    position = [int(i) for i in args.pos.split(',')] if args.pos is not None else None
+    resolution = tuple(int(i) for i in args.size.split('x'))
+    position = tuple(int(i) for i in args.pos.split(',')) if args.pos is not None else None
 
-    if args.rate is None and args.video:
+    output_to_video = False
+    if args.output:
+        filename, file_ext = os.path.splitext(args.output)
+        file_ext = file_ext.lower()
+        if file_ext == '.mp4':
+            output_to_video = True
+        elif file_ext != '.png':
+            error("output file must be either PNG or MP4 file.")
+
+        if args.interactive and not output_to_video:
+            error("--interactive may only be specified for MP4 output files.")
+
+        if args.interactive and args.tile_size:
+            error("--interactive is incompatible with --tile-size.")
+
+        if output_to_video:
+            if not args.duration and not args.interactive:
+                error("Must specify --duration for non-interactive video renderinng.")
+
+            if args.pause:
+                error("--pause may not be specified when rendering to video.")
+
+        elif args.duration:
+            error("--duration may not be specified for PNG output files.")
+
+    else:
+        args.interactive = True
+
+    if args.rate is None and (output_to_video or args.duration):
         args.rate = 30
 
     if args.rate is None or args.rate <= 0.0:
-        if args.video:
+        if output_to_video:
             error("invalid --rate argument (%d)." % args.rate)
         else:
             interval = 'auto'
@@ -548,7 +588,7 @@ if __name__ == '__main__':
     ffmpeg = None
     ffmpeg_pipe = None
 
-    if args.video:
+    if output_to_video:
         ffmpeg = subprocess.Popen(
             ('ffmpeg',
              '-threads', '0',
@@ -559,36 +599,26 @@ if __name__ == '__main__':
              '-s', args.size,
              '-i', '-',
              '-c:v', 'libx264',
-             '-y', args.video),
+             '-y', args.output),
             stdin=subprocess.PIPE)
         ffmpeg_pipe = ffmpeg.stdin
 
-        if args.pause:
-            warn("--pause ignored when rendering to video.")
-            args.pause = False
-
-        if args.tiled and args.duration is None:
-            error("must specify --duration for tiled video rendering.")
-    else:
-        if args.duration:
-            warn("--duration ignored unless rendering to video.")
-            args.duration = None
-
     canvas = RenderingCanvas(glsl_shader,
                              args.input,
-                             size=resolution,
+                             interactive=args.interactive,
+                             output_size=resolution,
+                             render_size=(args.tile_size,) * 2 if args.tile_size else resolution,
                              position=position,
                              start_time=args.time,
                              interval=interval,
                              duration=args.duration,
                              always_on_top=args.top,
                              paused=args.pause,
-                             tiled_render=args.tiled,
+                             output=args.output,
                              progress_file=args.progress_file,
-                             tile_size=args.tile_size,
                              ffmpeg_pipe=ffmpeg_pipe)
 
-    if not args.video:
+    if not args.output:
         observer = Observer()
         observer.schedule(ShaderWatcher(filepath, canvas), os.path.dirname(filepath))
         observer.start()
