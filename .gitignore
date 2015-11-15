@@ -55,3 +55,15 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Screenshots
+/*.png
+
+# Videos
+/*.mp4
+
+# Windows stuff
+/Thumbs.db
+
+# Emacs config
+/.dir-locals.el
