@@ -76,30 +76,13 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
 """
 
 
-# Flushes are here to fix issues when connected to a pipe in Windows, e.g. in mintty or emacs
-# See e.g. https://github.com/mintty/mintty/issues/56
-
-def print_msg(msg):
-    sys.stderr.flush()
-    sys.stdout.write(msg)
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-
-
-def print_err(msg):
-    sys.stdout.flush()
-    sys.stderr.write(msg)
-    sys.stderr.write("\n")
-    sys.stderr.flush()
-
-
 def error(msg):
-    print_err("Error: " + msg)
+    print("Error: " + msg, file=sys.stderr)
     sys.exit(1)
 
 
 def warn(msg):
-    print_err("Warning: " + msg)
+    print("Warning: " + msg, file=sys.stderr)
 
 
 def noise(resolution=64, nchannels=1):
@@ -253,8 +236,8 @@ class RenderingCanvas(app.Canvas):
             if not status:
                 errors = gl.glGetShaderInfoLog(frag_handle)
                 errors = self.process_errors(errors)
-                print_err("Shader failed to compile:")
-                print_err(errors)
+                print("Shader failed to compile:", file=sys.stderr)
+                print(errors, file=sys.stderr)
 
                 # Switch to error shader
 
@@ -327,16 +310,16 @@ class RenderingCanvas(app.Canvas):
             img = _screenshot()
             self.write_img(img)
         elif event.key == "a":
-            print_msg("Size/pos args: --size %dx%d --pos %d,%d" %
-                      (self.physical_size[0],
-                       self.physical_size[1],
-                       self.position[0],
-                       self.position[1]))
+            print("Size/pos args: --size %dx%d --pos %d,%d" %
+                  (self.physical_size[0],
+                   self.physical_size[1],
+                   self.position[0],
+                   self.position[1]))
         elif event.key == "f":
             self._profile = not self._profile
             if self._profile:
                 def print_profile(fps):
-                    print_msg("%.2f ms/frame" % (1000.0 / float(fps)))
+                    print("%.2f ms/frame" % (1000.0 / float(fps)))
                     return False
 
                 self.measure_fps(1.0, print_profile)
@@ -387,13 +370,13 @@ class RenderingCanvas(app.Canvas):
             clock_time_total = clock_time_per_tile * total_tile_count
             clock_time_remain = clock_time_total - clock_time_elapsed
 
-            print_msg("Tile %d / %d (%.2f%%); %s elapsed; %s remaining; %s total" % \
-                      (rendered_tile_count,
-                       total_tile_count,
-                       rendered_tile_count * 100.0 / total_tile_count,
-                       str(datetime.timedelta(seconds=round(clock_time_elapsed))),
-                       str(datetime.timedelta(seconds=round(clock_time_remain))),
-                       str(datetime.timedelta(seconds=round(clock_time_total)))))
+            print("Tile %d / %d (%.2f%%); %s elapsed; %s remaining; %s total" % \
+                  (rendered_tile_count,
+                   total_tile_count,
+                   rendered_tile_count * 100.0 / total_tile_count,
+                   str(datetime.timedelta(seconds=round(clock_time_elapsed))),
+                   str(datetime.timedelta(seconds=round(clock_time_remain))),
+                   str(datetime.timedelta(seconds=round(clock_time_total)))))
 
             if self._tile_index == self._tile_count:
                 if self._ffmpeg_pipe:
@@ -452,7 +435,7 @@ class RenderingCanvas(app.Canvas):
         return '\n'.join(linesOut)
 
     def print_t(self):
-        print_msg("t=%f" % self.program['iGlobalTime'])
+        print("t=%f" % self.program['iGlobalTime'])
 
     def ensure_timer(self):
         if not self._timer:
@@ -482,7 +465,7 @@ class RenderingCanvas(app.Canvas):
                 suffix = suffix + 1
             filename = filepat % suffix
         io.write_png(filename, img)
-        print_msg("Wrote " + filename)
+        print("Wrote " + filename)
 
 
 class ShaderWatcher(FileSystemEventHandler):
@@ -493,7 +476,7 @@ class ShaderWatcher(FileSystemEventHandler):
 
     def on_modified(self, event):
         if os.path.abspath(event.src_path) == self._filename:
-            print_msg("Updating shader...")
+            print("Updating shader...")
 
             glsl_shader = open(self._filename, 'r').read()
 
