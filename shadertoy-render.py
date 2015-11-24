@@ -215,7 +215,7 @@ class RenderingCanvas(app.Canvas):
                 self.program['iGlobalTime'] += self._interval
 
     def write_video_frame(self, img):
-        if img.shape[0] != self._render_size[1] or img.shape[1] != self._render_size[0]:
+        if img.shape[0] != self._output_size[1] or img.shape[1] != self._output_size[0]:
             warn("Frame data is wrong size! Video will be corrupted.")
 
         self._ffmpeg_pipe.write(img.tostring())
